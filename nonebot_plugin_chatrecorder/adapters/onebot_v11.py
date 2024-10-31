@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from nonebot.adapters import Bot as BaseBot
+from nonebot import on
+from nonebot.compat import model_dump
+from nonebot.adapters import Bot as BaseBot , Event
 from nonebot.message import event_postprocessor
 from nonebot_plugin_orm import get_session
 from nonebot_plugin_session import Session, SessionLevel, extract_session
@@ -54,28 +56,16 @@ try:
 
     if plugin_config.chatrecorder_record_send_msg:
 
-        @Bot.on_called_api
+        @on("message_sent",block=False).handle()
         async def record_send_msg(
             bot: BaseBot,
-            e: Optional[Exception],
-            api: str,
-            data: dict[str, Any],
-            result: Any,
+            event: Event,
         ):
+            data = model_dump(event)
             if not isinstance(bot, Bot):
                 return
-            if e or not result:
-                return
-            if api not in ["send_msg", "send_private_msg", "send_group_msg"]:
-                return
 
-            if api == "send_group_msg" or (
-                api == "send_msg"
-                and (
-                    data.get("message_type") == "group"
-                    or (data.get("message_type") == None and data.get("group_id"))
-                )
-            ):
+            if (data.get("message_type") == "group"or (data.get("message_type") == None and data.get("group_id"))):
                 level = SessionLevel.LEVEL2
             else:
                 level = SessionLevel.LEVEL1
@@ -85,18 +75,18 @@ try:
                 bot_type=bot.type,
                 platform=SupportedPlatform.qq,
                 level=level,
-                id1=str(data.get("user_id", "")) or None,
+                id1=str(data.get("target_id", "")) or None,
                 id2=str(data.get("group_id", "")) or None,
                 id3=None,
             )
             session_persist_id = await get_session_persist_id(session)
 
-            message = Message(data["message"])
+            message = Message(data["raw_message"])
             record = MessageRecord(
                 session_persist_id=session_persist_id,
                 time=remove_timezone(datetime.now(timezone.utc)),
                 type="message_sent",
-                message_id=str(result["message_id"]),
+                message_id=str(data["message_id"]),
                 message=serialize_message(adapter, message),
                 plain_text=message.extract_plain_text(),
             )
